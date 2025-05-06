@@ -119,22 +119,51 @@ def create_new_rule(ip_list):
     logging.info("Prepared new rule: %s", json.dumps(new_rule, indent=2))
     return new_rule
 
+def is_default_allow_rule(rule):
+    return (
+        rule.get("comment", "").strip().lower() == "default rule" and
+        rule.get("policy", "").lower() == "allow" and
+        rule.get("protocol", "").lower() == "any" and
+        rule.get("srcCidr", "").lower() == "any" and
+        rule.get("destCidr", "").lower() == "any" and
+        rule.get("srcPort", "").lower() == "any" and
+        rule.get("destPort", "").lower() == "any"
+    )
+
 def update_acl_with_new_rule(org_id, rules, new_rule, position='top', insert_before_comment=None):
+    cleaned_rules = rules[:]
+
+    # Remove a trailing default allow rule only if it's at the bottom
+    if cleaned_rules and is_default_allow_rule(cleaned_rules[-1]):
+        logging.warning("Removing trailing default 'allow any any' rule before appending new rule.")
+        print("⚠️ Removing trailing default 'allow any any' rule before submitting.")
+        cleaned_rules = cleaned_rules[:-1]
+
+    # Warn if other such rules are found elsewhere (but do not remove)
+    for i, rule in enumerate(cleaned_rules):
+        if is_default_allow_rule(rule):
+            logging.warning("Default 'allow any any' rule found at position %d (not removed).", i)
+            print(f"⚠️ Found 'allow any any' rule at position {i} (not removed).")
+
+    # Insert the new rule
     if position == 'top':
-        updated_rules = [new_rule] + rules
+        updated_rules = [new_rule] + cleaned_rules
     elif position == 'bottom':
-        updated_rules = rules + [new_rule]
+        updated_rules = cleaned_rules + [new_rule]
     elif position == 'before' and insert_before_comment:
-        index = next((i for i, r in enumerate(rules) if r.get('comment') == insert_before_comment), len(rules))
-        updated_rules = rules[:index] + [new_rule] + rules[index:]
+        index = next((i for i, r in enumerate(cleaned_rules) if r.get('comment') == insert_before_comment), len(cleaned_rules))
+        updated_rules = cleaned_rules[:index] + [new_rule] + cleaned_rules[index:]
     else:
-        updated_rules = rules + [new_rule]
+        updated_rules = cleaned_rules + [new_rule]
+
     logging.info("Submitting updated ruleset with %d rules", len(updated_rules))
     logging.info("Full ruleset being submitted: %s", json.dumps(updated_rules, indent=2))
+
     result = dashboard.appliance.updateOrganizationApplianceVpnVpnFirewallRules(org_id, rules=updated_rules)
-    print("\nUpdated Fabric ACL successfully.")
+    print("\n✅ Updated Fabric ACL successfully.")
     logging.info("ACL update response: %s", json.dumps(result, indent=2))
     return result
+
 
 def main():
     try:
@@ -162,7 +191,7 @@ def main():
         if partials:
             print("\n🔍 Found overlapping rules (not full matches):\n")
             for match in partials:
-                print(f"🔢 Rule #{match['index']} – Comment: {match['rule'].get('comment', '')}")
+                print(f"🔢 Rule #{match['index']+1} – Comment: {match['rule'].get('comment', '')}")
                 print(f"🧩 Matching IPs: {', '.join(match['ip_matches'])}")
                 print("🧪 Field matches:")
                 for field, is_match in match["field_matches"].items():
@@ -179,11 +208,11 @@ def main():
                 new_rule = create_new_rule(ip_list)
                 print("\nCurrent rules:")
                 for idx, rule in enumerate(current_rules):
-                    print(f"  {idx}: {rule.get('comment', '<no comment>')}")
+                    print(f"  {idx + 1}: {rule.get('comment', '<no comment>')}")
                 position = input("\nWhere should the new rule be inserted? (top/bottom/before): ").strip().lower()
                 if position == 'before':
                     try:
-                        rule_index = int(input("Enter the rule number to insert before (as shown above): ").strip())
+                        rule_index = int(input("Enter the rule number to insert before (as shown above): ").strip())-1
                         if 0 <= rule_index < len(current_rules):
                             comment = current_rules[rule_index].get('comment', '')
                             update_acl_with_new_rule(MERAKI_ORG_ID, current_rules, new_rule, position=position, insert_before_comment=comment)
