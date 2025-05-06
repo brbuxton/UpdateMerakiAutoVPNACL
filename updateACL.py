@@ -1,10 +1,10 @@
-import os
 import json
 import csv
 import ipaddress
 import logging
 from meraki import DashboardAPI
-from env import MERAKI_API_KEY, MERAKI_ORG_ID
+from token_manager import get_access_token
+from env import MERAKI_ORG_ID
 
 # === CONFIGURABLE ===
 SOURCE_CIDR = "192.168.0.0/16"
@@ -19,7 +19,9 @@ logging.basicConfig(
 )
 
 # === Load Dashboard ===
-dashboard = DashboardAPI(api_key=MERAKI_API_KEY)
+access_token = get_access_token()
+dashboard = DashboardAPI(api_key=access_token)
+
 
 def load_blocked_ips(csv_path):
     with open(csv_path, newline='', encoding='utf-8-sig') as csvfile:
